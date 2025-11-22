@@ -1,96 +1,93 @@
-# 📘 PROJECT RESERVA: TECHNICAL DESIGN DOCUMENT
+# 📅 Reserva - SaaS Booking & Scheduling Platform
 
-**Mô tả:** Hệ thống SaaS đặt lịch dịch vụ & quản lý thời gian thực (Booking & Scheduling Platform).
+![NestJS](https://img.shields.io/badge/nestjs-%23E0234E.svg?style=for-the-badge&logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
+![Postgres](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-3982CE?style=for-the-badge&logo=Prisma&logoColor=white)
 
-**Kiến trúc:** Microservices, Event-Driven.
+**Reserva** là một hệ thống backend mô phỏng nền tảng đặt lịch với khả năng xử lý đồng thời cao (tương tự Calendly hoặc Booking.com) được xây dựng với **NestJS Microservices**.
 
-**Tech Stack:** NestJS, gRPC, Prisma, PostgreSQL, Redis, Docker.
+Dự án tập trung vào việc giải quyết các thách thức backend thực tế: **Tính nhất quán dữ liệu (Data Consistency)**, **Xử lý tranh chấp (Race Conditions)** khi đặt slot, và **Giao tiếp độ trễ thấp** giữa các service sử dụng gRPC.
 
 ---
 
 ## 📑 Mục lục
 
-1. [Tổng quan (Overview)](#1-tổng-quan-overview)
-2. [Kiến trúc hệ thống (System Architecture)](#2-kiến-trúc-hệ-thống-system-architecture)
-3. [Database Design (Prisma Schema)](#3-database-design-prisma-schema)
-4. [Giao tiếp gRPC (Proto Contracts)](#4-giao-tiếp-grpc-proto-contracts)
-5. [Logic nghiệp vụ cốt lõi (Core Logic)](#5-logic-nghiệp-vụ-cốt-lõi-core-logic)
-6. [Kế hoạch triển khai (Roadmap)](#6-kế-hoạch-triển-khai-roadmap)
-7. [Chiến lược Testing (Testing Strategy)](#7-chiến-lược-testing-testing-strategy)
+- [🌟 Tính năng chính](#-tính-năng-chính)
+- [🏗 Kiến trúc hệ thống](#-kiến-trúc-hệ-thống)
+- [💾 Database Design](#-database-design)
+- [🚀 Getting Started](#-getting-started)
+- [🔧 Giao tiếp gRPC](#-giao-tiếp-grpc)
+- [⚡ Logic nghiệp vụ cốt lõi](#-logic-nghiệp-vụ-cốt-lõi)
+- [🗺 Roadmap](#-roadmap)
+- [🧪 Testing Strategy](#-testing-strategy)
 
 ---
 
-## 1. TỔNG QUAN (OVERVIEW)
+## 🌟 Tính năng chính
 
-### 1.1. Bài toán kinh doanh
-
-Xây dựng nền tảng cho phép các **Nhà cung cấp (Providers)** (Salon tóc, Sân cầu lông, Phòng khám...) tạo dịch vụ và quản lý lịch làm việc. **Người dùng (Users)** có thể tìm kiếm, xem khung giờ trống (Slots) và đặt lịch (Booking) theo thời gian thực.
-
-### 1.2. Mục tiêu kỹ thuật (Learning Goals)
-
-- **Microservices Communication:** Thành thạo gRPC (Protobuf) giữa các service.
-- **High Concurrency:** Xử lý tranh chấp (Race Condition) khi nhiều người đặt cùng 1 slot (Redis Lock / DB Isolation).
-- **Data Consistency:** Đảm bảo tính nhất quán dữ liệu phân tán (Saga Pattern / Two-phase commit - ở mức đơn giản).
-- **Complex Logic:** Thuật toán tính toán khung giờ trống (Time Slot Calculation).
+- **Kiến trúc Microservices**: Cấu trúc Monorepo sử dụng NestJS, phân tách các service riêng biệt (Auth, Provider, Booking).
+- **Giao tiếp hiệu năng cao**: Sử dụng **gRPC (Protobuf)** cho việc giao tiếp giữa các service thay vì REST.
+- **Tính toán Slot động**: Thuật toán sinh ra các khung giờ trống dựa trên cấu hình provider, giờ mở cửa và booking hiện có.
+- **Xử lý đồng thời**: Triển khai **Redis Distributed Lock (Redlock)** để ngăn chặn đặt trùng (Race Conditions) khi nhiều user đặt cùng slot.
+- **Thiết kế Database vững chắc**: Sử dụng **PostgreSQL** với **Prisma ORM** để tương tác database type-safe.
+- **Infrastructure mở rộng**: Môi trường Dockerized hoàn chỉnh (App, DB, Redis) sẵn sàng deploy.
 
 ---
 
-## 2. KIẾN TRÚC HỆ THỐNG (SYSTEM ARCHITECTURE)
+## 🏗 Kiến trúc hệ thống
 
-**Mô hình:** Monorepo (Nx hoặc NestJS Workspace).
+Hệ thống được chia thành các microservices sau:
 
-### 2.1. Sơ đồ các Service
+| Service | Tech Stack | Mô tả |
+| :--- | :--- | :--- |
+| **API Gateway** | NestJS (HTTP) | Điểm vào cho clients. Xử lý routing, aggregation, và chuyển đổi REST-to-gRPC. |
+| **Auth Service** | NestJS (gRPC) | Xử lý đăng ký User, Login, phát hành JWT, và RBAC. |
+| **Provider Service** | NestJS (gRPC) | Quản lý danh mục dịch vụ, cấu hình cửa hàng, và giờ mở cửa. |
+| **Booking Service** | NestJS (gRPC) | **Logic cốt lõi**. Xử lý tính toán slot, giữ chỗ, và cơ chế locking. |
+| **Payment Service** | NestJS (gRPC/Event) | Mock thanh toán, cập nhật trạng thái đơn hàng. |
 
-#### **API Gateway (HTTP/REST)**
-- Cổng duy nhất nhận request từ Client.
-- Xác thực Token (JWT).
-- Điều hướng request sang gRPC client tương ứng.
+### Sơ đồ luồng dữ liệu
 
-#### **Auth Service (gRPC)**
-- Quản lý User, Phân quyền (Admin/Provider/User).
-- DB: `reserva_auth` (Postgres).
-
-#### **Provider Service (gRPC)**
-- Quản lý thông tin cửa hàng, giờ mở cửa (Config), danh sách dịch vụ.
-- DB: `reserva_provider` (Postgres).
-
-#### **Booking Service (gRPC - Core)**
-- Tính toán Slot trống.
-- Tạo Booking, xử lý giữ chỗ (Hold).
-- DB: `reserva_booking` (Postgres).
-
-#### **Payment Service (gRPC/Event)**
-- Mock thanh toán, cập nhật trạng thái đơn hàng.
-
-### 2.2. Infrastructure
-
-- **Docker Compose:** Orchestration.
-- **PostgreSQL:** Database chính (mỗi service 1 DB logic hoặc schema riêng).
-- **Redis:** Caching (lưu Slot, Token) & Distributed Lock.
+```
+Client (Web/Mobile)
+    ↓
+API Gateway (REST/HTTP)
+    ↓ (gRPC)
+┌─────────────┬──────────────┬───────────────┐
+│ Auth Service│Provider Svc  │Booking Service│
+└─────────────┴──────────────┴───────────────┘
+    ↓              ↓                ↓
+PostgreSQL     PostgreSQL      PostgreSQL
+                                    ↓
+                                  Redis
+```
 
 ---
 
-## 3. DATABASE DESIGN (PRISMA SCHEMA)
+## 💾 Database Design
 
-Dù là Microservices, ta hình dung cấu trúc dữ liệu tổng thể như sau:
-
-### 3.1. Auth DB
+### Auth DB
 
 ```prisma
 model User {
   id        Int      @id @default(autoincrement())
   email     String   @unique
-  password  String   // Hash
+  password  String   // Hashed with bcrypt
   role      String   // USER, PROVIDER, ADMIN
+  name      String?
+  createdAt DateTime @default(now())
 }
 ```
 
-### 3.2. Provider DB
+### Provider DB
 
 ```prisma
 model ProviderConfig {
   id          String   @id @default(uuid())
-  providerId  Int      // Link tới User.id bên Auth
+  providerId  Int      @unique // Link tới User.id bên Auth
   openTime    String   @default("08:00")
   closeTime   String   @default("22:00")
   timeStep    Int      @default(30) // Bước nhảy: 15p, 30p, 60p
@@ -101,11 +98,14 @@ model Service {
   providerId  Int
   name        String
   duration    Int      // Thời lượng (phút)
-  price       Decimal
+  price       Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+  
+  @@index([providerId])
 }
 ```
 
-### 3.3. Booking DB
+### Booking DB
 
 ```prisma
 model Booking {
@@ -117,141 +117,293 @@ model Booking {
   endTime     DateTime
   status      String   // PENDING, CONFIRMED, CANCELLED
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   
-  @@index([providerId, startTime, endTime]) // Index quan trọng để query nhanh
+  @@index([providerId, startTime, endTime])
+  @@index([userId])
 }
 ```
 
 ---
 
-## 4. GIAO TIẾP GRPC (PROTO CONTRACTS)
+## 🚀 Getting Started
 
-### 4.1. auth.proto
+### Prerequisites
 
-```protobuf
-rpc Register(RegisterReq) returns (RegisterRes)
-rpc Login(LoginReq) returns (LoginRes)
-rpc ValidateToken(TokenReq) returns (UserRes)
+- Node.js (v18+) & npm/pnpm
+- Docker & Docker Compose
+
+### Installation
+
+1. **Clone repository**
+   ```bash
+   git clone https://github.com/yourusername/reserva.git
+   cd reserva
+   ```
+
+2. **Start Infrastructure (Postgres & Redis)**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Install Dependencies**
+   ```bash
+   npm install
+   # hoặc
+   pnpm install
+   ```
+
+4. **Setup Database (Prisma)**
+   ```bash
+   # Run migration cho từng service
+   npx prisma migrate dev --name init
+   npx prisma generate
+   ```
+
+5. **Run Services**
+   ```bash
+   # Development mode
+   npm run start:dev
+   
+   # Hoặc chạy riêng từng service
+   npm run start:dev -- auth
+   npm run start:dev -- gateway
+   ```
+
+### Testing API
+
+**Register User:**
+```bash
+curl -X POST http://localhost:3000/auth/register \
+   -H 'Content-Type: application/json' \
+   -d '{
+     "email": "demo@reserva.com",
+     "password": "123456",
+     "name": "Demo User"
+   }'
 ```
 
-### 4.2. provider.proto
-
-```protobuf
-rpc CreateService(CreateServiceReq) returns (ServiceRes)
-rpc GetProviderConfig(ProviderIdReq) returns (ConfigRes)
+**Login:**
+```bash
+curl -X POST http://localhost:3000/auth/login \
+   -H 'Content-Type: application/json' \
+   -d '{
+     "email": "demo@reserva.com",
+     "password": "123456"
+   }'
 ```
-
-### 4.3. booking.proto
-
-```protobuf
-rpc GetAvailableSlots(GetSlotsReq) returns (SlotsRes)  // API Khó nhất
-rpc CreateBooking(CreateBookingReq) returns (BookingRes)
-```
-
-**Chi tiết:**
-- `GetAvailableSlots`: Input: Ngày, ServiceID. Output: List giờ có thể đặt.
-- `CreateBooking`: Input: UserID, Time, ServiceID.
 
 ---
 
-## 5. LOGIC NGHIỆP VỤ CỐT LÕI (CORE LOGIC)
+## 🔧 Giao tiếp gRPC
 
-### 5.1. Logic tạo Slot (Get Available Slots)
+### auth.proto
 
-**Input:** Ngày 20/10, Dịch vụ cắt tóc (45 phút), Shop mở 8h-22h.
+```protobuf
+service AuthService {
+  rpc Register(RegisterRequest) returns (AuthResponse);
+  rpc Login(LoginRequest) returns (AuthResponse);
+  rpc ValidateToken(TokenRequest) returns (UserResponse);
+}
+```
+
+### provider.proto
+
+```protobuf
+service ProviderService {
+  rpc CreateService(CreateServiceRequest) returns (ServiceResponse);
+  rpc GetProviderConfig(ProviderIdRequest) returns (ConfigResponse);
+  rpc UpdateConfig(UpdateConfigRequest) returns (ConfigResponse);
+}
+```
+
+### booking.proto
+
+```protobuf
+service BookingService {
+  // API khó nhất - Tính toán slot trống
+  rpc GetAvailableSlots(GetSlotsRequest) returns (SlotsResponse);
+  
+  // Tạo booking với locking mechanism
+  rpc CreateBooking(CreateBookingRequest) returns (BookingResponse);
+  
+  rpc CancelBooking(CancelBookingRequest) returns (BookingResponse);
+}
+```
+
+---
+
+## ⚡ Logic nghiệp vụ cốt lõi
+
+### 5.1. Thuật toán tính Slot trống (Get Available Slots)
+
+**Input:** 
+- Ngày: `2024-01-20`
+- Dịch vụ: Cắt tóc (45 phút)
+- Shop: Mở cửa 8h-22h, timeStep = 30p
 
 **Các bước:**
 
-1. **Lấy config giờ mở cửa** → Tạo mảng các mốc thời gian (Time Grid) dựa trên `timeStep` (ví dụ 30p):
+1. **Tạo Time Grid**
+   ```typescript
+   // Từ 08:00 đến 22:00, bước nhảy 30p
+   const timeGrid = ['08:00', '08:30', '09:00', ..., '21:30'];
    ```
-   [08:00, 08:30, 09:00, ..., 21:30]
+
+2. **Lấy Bookings hiện có**
+   ```sql
+   SELECT * FROM bookings 
+   WHERE providerId = ? 
+   AND DATE(startTime) = '2024-01-20'
    ```
 
-2. **Lấy danh sách Booking đã tồn tại** trong ngày 20/10 từ DB.
+3. **Lọc slot available**
+   ```typescript
+   const availableSlots = timeGrid.filter(slot => {
+     const slotEnd = addMinutes(slot, 45); // 45p
+     // Kiểm tra không đè lên bất kỳ booking nào
+     return !hasOverlap(slot, slotEnd, existingBookings);
+   });
+   ```
 
-3. **Duyệt từng mốc thời gian** trong Time Grid:
-   - Nếu `(Mốc đó + 45p)` KHÔNG đè lên bất kỳ Booking nào
-   - → Thêm vào danh sách Available.
+**Output:** `['08:00', '09:30', '11:00', ...]`
 
-**Output:** `['08:00', '09:30', ...]`
+### 5.2. Xử lý Race Condition với Redis Lock
 
-### 5.2. Logic Chống trùng lặp (Race Condition)
+**Flow khi User đặt chỗ:**
 
-**Khi User bấm "Đặt chỗ":**
-
-1. **Redis Lock:**
-   - Tạo key: `lock:provider:{id}:time:{start_time}`
-   - Nếu tồn tại → Trả lỗi "Vừa có người đặt"
-   - Nếu chưa → Set key (expire 10s)
-
-2. **Double Check DB:**
-   - Query DB lần nữa xem khoảng thời gian đó có ai đặt chưa
-   - (Đề phòng Redis mất data)
-
-3. **Insert DB:**
-   - Ghi Booking vào Postgres
-
-4. **Release Lock:**
-   - Xóa key Redis
+```typescript
+async createBooking(userId, providerId, startTime, serviceId) {
+  const lockKey = `lock:provider:${providerId}:time:${startTime}`;
+  
+  // 1. Acquire Lock (10s TTL)
+  const lock = await redis.set(lockKey, 'locked', 'EX', 10, 'NX');
+  if (!lock) {
+    throw new ConflictException('Slot vừa được đặt bởi người khác');
+  }
+  
+  try {
+    // 2. Double-check DB
+    const existing = await db.booking.findFirst({
+      where: {
+        providerId,
+        startTime: { lte: endTime },
+        endTime: { gte: startTime }
+      }
+    });
+    
+    if (existing) {
+      throw new ConflictException('Slot không còn trống');
+    }
+    
+    // 3. Insert Booking
+    const booking = await db.booking.create({
+      data: { userId, providerId, serviceId, startTime, endTime }
+    });
+    
+    return booking;
+    
+  } finally {
+    // 4. Release Lock
+    await redis.del(lockKey);
+  }
+}
+```
 
 ---
 
-## 6. KẾ HOẠCH TRIỂN KHAI (ROADMAP)
+## 🗺 Roadmap
 
-### Phase 1: The Foundation ✅ (Đã làm một phần)
+### ✅ Phase 1: Foundation (Hoàn thành)
 
-- [x] Setup Monorepo (NestJS)
+- [x] Setup Monorepo NestJS
 - [x] Setup Docker (Postgres)
-- [x] Hoàn thiện Auth Service (JWT, Hash Password)
-- [x] API Gateway forward request auth thành công
+- [x] Auth Service (JWT, Hash Password)
+- [x] API Gateway routing
 
-### Phase 2: Provider & Service Catalog 🚧
+### 🚧 Phase 2: Provider & Service Catalog (Đang làm)
 
-- [ ] Tạo `provider-service`
-- [ ] Define `provider.proto`
-- [ ] API cho phép Provider tạo Config (Giờ mở cửa) và Dịch vụ (Tên, Giá, Thời lượng)
-- [ ] Seed data (Tạo dữ liệu mẫu)
+- [ ] Provider Service với gRPC
+- [ ] API tạo Config (Giờ mở cửa)
+- [ ] API quản lý Services (CRUD)
+- [ ] Seed data mẫu
 
-### Phase 3: The Booking Engine ⚡ (Thách thức)
+### ⚡ Phase 3: Booking Engine (Core)
 
-- [ ] Tạo `booking-service`
-- [ ] Thuật toán tính toán Slot trống (Logic 5.1)
-- [ ] API `POST /bookings`: Xử lý đặt lịch cơ bản (chưa cần Lock)
+- [ ] Booking Service
+- [ ] Thuật toán tính Slot (Logic 5.1)
+- [ ] API `POST /bookings` (chưa có Lock)
 
-### Phase 4: Advanced Engineering 🔥 (Nâng cao)
+### 🔥 Phase 4: Advanced Features
 
-- [ ] Tích hợp Redis vào Docker
-- [ ] Cài đặt Redis Lock (Redlock) xử lý Race Condition
-- [ ] Viết Script Stress Test (JMeter/k6/NodeJS Script) để test vụ tranh chấp slot
-- [ ] Payment Mock integration
+- [ ] Redis Distributed Lock (Redlock)
+- [ ] Stress Test Script (k6/Artillery)
+- [ ] Payment Mock Integration
+- [ ] Notification Service (Email/SMS)
 
 ---
 
-## 7. CHIẾN LƯỢC TESTING (TESTING STRATEGY)
+## 🧪 Testing Strategy
 
 ### Unit Test
-- Test logic tính toán Slot
-- Đầu vào: Giờ này
-- Đầu ra: Phải là list này
+```bash
+npm run test
+```
+- Test logic tính toán slot
+- Test validation rules
+- Test business logic isolation
 
 ### Integration Test
-- Test luồng: `Gateway → gRPC → DB`
+```bash
+npm run test:e2e
+```
+- Test flow: `Gateway → gRPC → DB`
+- Test authentication flow
+- Test booking flow end-to-end
 
 ### Load/Stress Test
-- Dùng script bắn **100 request/giây** vào cùng 1 slot
-- Kiểm chứng Redis Lock hoạt động tốt
-- **Kết quả mong đợi:** Chỉ 1 booking được tạo
+
+**Mục tiêu:** Kiểm tra Race Condition handling
+
+```bash
+cd stress-test
+node race-condition.js
+```
+
+**Scenario:**
+- Bắn 100 requests đồng thời vào cùng 1 slot
+- **Kỳ vọng:** Chỉ 1 booking được tạo thành công
+- **Metric:** Latency, Success Rate, Error Distribution
 
 ---
 
-## 📝 License
+## 📚 Learning Outcomes
 
-UNLICENSED - Private project
+Qua việc xây dựng Reserva, tôi đã học được:
+
+- ✅ **Monorepo Management** với NestJS CLI
+- ✅ **gRPC vs REST** - Performance trade-offs
+- ✅ **Database Locking** - Optimistic vs Pessimistic
+- ✅ **Distributed Systems** - CAP theorem trong thực tế
+- ✅ **Event-Driven Architecture** concepts
+- ✅ **High-Concurrency** patterns
+
+---
+
+## 📄 License
+
+MIT License
 
 ## 👨‍💻 Author
 
-Hoang
+**Hoang**
 
 ---
 
+<div align="center">
+
 **Happy Coding! 🚀**
+
+Made with ❤️ using NestJS
+
+</div>
