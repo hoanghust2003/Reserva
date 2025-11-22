@@ -5,21 +5,12 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "webpack": true,
-    "tsConfigPath": "apps/reserva/tsconfig.app.json"
+    "tsConfigPath": "apps/gateway/tsconfig.app.json"
   },
   "monorepo": true,
-  "root": "apps/reserva",
+  "root": "apps/gateway",
   "projects": {
-    "auth": {
-      "type": "application",
-      "root": "apps/auth",
-      "entryFile": "main",
-      "sourceRoot": "apps/auth/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/auth/tsconfig.app.json"
-      }
-    },
-    "gateway": {
+        "gateway": {
       "type": "application",
       "root": "apps/gateway",
       "entryFile": "main",
@@ -28,13 +19,13 @@
         "tsConfigPath": "apps/gateway/tsconfig.app.json"
       }
     },
-    "reserva": {
+    "auth": {
       "type": "application",
-      "root": "apps/reserva",
+      "root": "apps/auth",
       "entryFile": "main",
-      "sourceRoot": "apps/reserva/src",
+      "sourceRoot": "apps/auth/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/reserva/tsconfig.app.json"
+        "tsConfigPath": "apps/auth/tsconfig.app.json"
       }
     }
   }
